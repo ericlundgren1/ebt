@@ -1319,9 +1319,9 @@ pub fn holding_curve(
             // For each column: apply EWM to merged positions, then shift, compute pnl
             // Accumulate daily PnL across all columns
             let mut daily_pnl: Vec<(i64, f64)> = Vec::new(); // (day_ns, pnl_sum)
-            // Daily turnover: track TV=sum(|diff|) and sum(|pos|) per day
-            // turnover = TV / mean(|pos|), where mean uses bars_per_day (time steps, not column*bars)
-            // Using mean(|pos|) (not per-bar |pos|) avoids blow-up near zero crossings
+            // Daily turnover: track TV=sum(|diff|) and sum(|pos|) per day; the holding time is
+            // the pooled ratio sum(E_d) / sum(TV_d) over days (E_d = mean(|pos|) over the day's
+            // time steps, not column*bars), the same definition as the Python holding_time
             let mut daily_tv: Vec<(i64, f64, f64)> = Vec::new(); // (day_ns, sum_abs_diff, sum_abs_pos)
 
             for col_pre in &pre {
@@ -1401,13 +1401,13 @@ pub fn holding_curve(
                 if std > 0.0 { mean / std * 252.0_f64.sqrt() } else { 0.0 }
             };
 
-            // Daily turnover = TV / mean(|pos|) where mean uses time-step count (not column*bar count)
-            // bars_per_day is precomputed from price_ts to count unique time steps per day
+            // Pooled turnover = sum_d(TV_d) / sum_d(E_d), E_d = pos_sum / time steps in the day
+            // (bars_per_day is precomputed from price_ts to count unique time steps per day)
             let mean_daily_turnover = if daily_tv.is_empty() {
                 0.0
             } else {
-                let mut turnover_sum = 0.0;
-                let mut n_turnover_days = 0usize;
+                let mut tv_sum = 0.0;
+                let mut exposure_sum = 0.0;
                 for &(day_ns, tv, pos_sum) in &daily_tv {
                     // Skip non-trading days (flat PnL, same rule as the Sharpe sample above)
                     // — matches Python's business-day filter
@@ -1425,11 +1425,11 @@ pub fn holding_curve(
                     };
                     let mean_pos = pos_sum / n_time_bars;
                     if mean_pos > 0.0 {
-                        turnover_sum += tv / mean_pos;
-                        n_turnover_days += 1;
+                        tv_sum += tv;
+                        exposure_sum += mean_pos;
                     }
                 }
-                if n_turnover_days > 0 { turnover_sum / n_turnover_days as f64 } else { 0.0 }
+                if exposure_sum > 0.0 { tv_sum / exposure_sum } else { 0.0 }
             };
             let holding_days = if mean_daily_turnover > 0.0 { 1.0 / mean_daily_turnover } else { f64::INFINITY };
 

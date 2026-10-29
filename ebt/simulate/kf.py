@@ -843,11 +843,13 @@ def _sharpe_per_col_fast(pnl_df, resample=True):
 
 
 def turnover(p, resample=True, weights=None):
-    """Daily turnover: ratio-of-sums aggregation (stable near zero crossings).
+    """Daily turnover series whose mean is the pooled turnover of the sample.
 
-    Per day: sum(|Δpos|) / mean(|pos|).  Uses arithmetic mean of |pos| as
-    denominator so the result is frequency-independent and doesn't blow up
-    when positions cross zero.
+    Per day d: TV_d = sum(|Δpos|) over the day's bars and names, E_d = mean(|pos|) over the
+    day's bars (summed over names). The series is TV_d / mean_d(E_d), so its mean equals
+    sum(TV_d) / sum(E_d): a ratio of sums over the whole sample. A mean of per-day ratios
+    TV_d / E_d would let a day on which a book of few names sits near zero (a sign change)
+    dominate the figure; pooling makes the result frequency-independent and stable there.
 
     weights: forward bar counts of a reduced price grid (ebt.simulate.grid), one per row.
         They weight the EXPOSURE mean only — a trade is an event and counts once whatever
@@ -872,11 +874,12 @@ def turnover(p, resample=True, weights=None):
             daily_mean_exposure = (den_s * w).resample('B').sum() / w_s.resample('B').sum()
         valid = daily_mean_exposure > 0
         result = pd.Series(np.nan, index=daily_tv.index)
-        result[valid] = daily_tv[valid] / daily_mean_exposure[valid]
+        result[valid] = daily_tv[valid] / daily_mean_exposure[valid].mean()
         return result.dropna()
     else:
-        with np.errstate(divide='ignore', invalid='ignore'):
-            t_vals = np.where(den_per_bar == 0, np.nan, num_per_bar / den_per_bar)
+        ok = den_per_bar > 0
+        mean_exposure = den_per_bar[ok].mean() if ok.any() else np.nan
+        t_vals = np.where(ok, num_per_bar / mean_exposure, np.nan)
         return pd.Series(t_vals, index=p.index)
 
 
@@ -1269,12 +1272,11 @@ def _numpy_risk(vals, day_keys, unique_days, annualization=252 ** 0.5):
     return float(np.std(daily, ddof=1) * annualization)
 
 
-def _daily_turnover(pos_vals, day_keys, unique_days, weights=None):
-    """Per-day turnover = sum(|Δpos|) / weighted mean(|pos|) over the day's rows, pure numpy.
-
-    Returns the array of valid daily turnovers (empty when no day has exposure). ``weights``
-    are forward bar counts (ebt.simulate.grid) weighting the exposure mean and the bar count
-    only; None = every row counts once.
+def _daily_tv_exposure(pos_vals, day_keys, unique_days, weights=None):
+    """Per-day traded volume TV_d = sum(|Δpos|) and mean exposure E_d = weighted mean(|pos|)
+    over the day's rows, pure numpy. Returns ``(tv, exposure)`` over the days with exposure
+    (both empty when none has). ``weights`` are forward bar counts (ebt.simulate.grid)
+    weighting the exposure mean and the bar count only; None = every row counts once.
     """
     diff_abs = np.abs(np.diff(pos_vals, axis=0, prepend=np.full((1, pos_vals.shape[1]), np.nan)))
     p_abs = np.abs(pos_vals)
@@ -1289,33 +1291,31 @@ def _daily_turnover(pos_vals, day_keys, unique_days, weights=None):
     daily_mean_exposure = np.zeros_like(daily_pos_sum)
     daily_mean_exposure[valid] = daily_pos_sum[valid] / daily_n_bars[valid]
     valid2 = daily_mean_exposure > 0
-    return daily_tv[valid2] / daily_mean_exposure[valid2]
+    return daily_tv[valid2], daily_mean_exposure[valid2]
 
 
 def _numpy_turnover_mean(pos_vals, day_keys, unique_days, weights=None):
-    """Mean turnover (resampled to business days), pure numpy (see _daily_turnover)."""
-    daily_turnover = _daily_turnover(pos_vals, day_keys, unique_days, weights)
-    if len(daily_turnover) == 0:
+    """Pooled turnover sum(TV_d) / sum(E_d) over business days, pure numpy (= ``turnover(...).mean()``)."""
+    tv, exposure = _daily_tv_exposure(pos_vals, day_keys, unique_days, weights)
+    if len(tv) == 0:
         return np.nan
-    return float(np.mean(daily_turnover))
+    return float(tv.sum() / exposure.sum())
 
 
 def _numpy_holding_time(pos_vals, day_keys, unique_days, weights=None):
-    """Holding time in days: 1 / mean(TV_day / mean_exposure_day) (see _daily_turnover)."""
-    daily_turnover = _daily_turnover(pos_vals, day_keys, unique_days, weights)
-    if len(daily_turnover) == 0:
+    """Holding time in days: 1 / pooled turnover (see _daily_tv_exposure, ``holding_time``)."""
+    tv, exposure = _daily_tv_exposure(pos_vals, day_keys, unique_days, weights)
+    if len(tv) == 0:
         return np.inf
-    mean_t = float(np.mean(daily_turnover))
+    mean_t = float(tv.sum() / exposure.sum())
     return 1.0 / mean_t if mean_t > 0 else np.inf
 
 
 def holding_time(pos, resample=True, weights=None):
-    """Holding time in days: 1 / mean(TV_day / mean_exposure_day).
-
-    Per day: turnover = sum(|diff|) / mean(|pos|).
-    Uses arithmetic mean of |pos| as denominator, making it both
-    frequency-independent and stable near zero crossings (unlike 1/turnover
-    which uses sum-of-ratios |diff_i|/|pos_i| that blows up when |pos| -> 0).
+    """Holding time in days: 1 / pooled turnover = sum_d(E_d) / sum_d(TV_d), with
+    TV_d the day's traded volume sum(|Δpos|) and E_d its mean exposure mean(|pos|) (see
+    ``turnover``). A ratio of sums over the sample, so days on which the book sits near
+    zero do not dominate.
     weights: forward bar counts of a reduced grid (see turnover); None = unweighted.
     """
     vals = pos.values
@@ -1344,12 +1344,10 @@ def _holding_from_bars(num_per_bar, den_per_bar, index, resample=True, weights=N
         valid = daily_mean_exposure > 0
         if not valid.any():
             return np.inf
-        daily_turnover = daily_tv[valid] / daily_mean_exposure[valid]
-        mean_t = daily_turnover.mean()
+        mean_t = daily_tv[valid].sum() / daily_mean_exposure[valid].sum()
     else:
-        with np.errstate(divide='ignore', invalid='ignore'):
-            t_vals = np.where(den_per_bar == 0, np.nan, num_per_bar / den_per_bar)
-        mean_t = np.nanmean(t_vals)
+        ok = den_per_bar > 0
+        mean_t = np.nan_to_num(num_per_bar[ok], nan=0.0).sum() / den_per_bar[ok].sum() if ok.any() else np.nan
     return 1.0 / mean_t if mean_t > 0 and not np.isnan(mean_t) else np.inf
 
 
@@ -1396,7 +1394,7 @@ def _bday_keys(day_keys):
 
 def _holding_from_bars_numpy(num_per_bar, den_per_bar, day_keys, unique_days):
     """``_holding_from_bars(..., resample=True)`` on day keys instead of an index: per day
-    turnover = sum|d pos| / mean|pos|, holding = 1 / mean over the days with exposure."""
+    TV_d = sum|d pos| and E_d = mean|pos|, holding = sum(E_d) / sum(TV_d) over the days with exposure."""
     inverse = np.searchsorted(unique_days, day_keys)
     n = len(unique_days)
     daily_tv = np.bincount(inverse, weights=np.nan_to_num(num_per_bar, nan=0.0), minlength=n)
@@ -1407,7 +1405,7 @@ def _holding_from_bars_numpy(num_per_bar, den_per_bar, day_keys, unique_days):
     valid = daily_mean_exposure > 0
     if not valid.any():
         return np.inf
-    mean_t = float(np.mean(daily_tv[valid] / daily_mean_exposure[valid]))
+    mean_t = float(daily_tv[valid].sum() / daily_mean_exposure[valid].sum())
     return 1.0 / mean_t if mean_t > 0 else np.inf
 
 

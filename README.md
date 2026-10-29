@@ -123,7 +123,7 @@ Computed by `one_pager` and `plot_ensemble` ("kf" = key figure). Sharpe and risk
 | `sharpe exbias` / `sharpe bias` | Sharpe of the timing component and of the static component. Each asset's position (in risk units) is split into its time-mean and the remainder; `bias` is the PnL of the constant mean position, `exbias` the rest. Slow books can earn most of their raw Sharpe from `bias`. |
 | `sharpe long` / `sharpe short` | Sharpe of the long and short legs. |
 | `sharpe w costs` | Sharpe after spread costs when `spreads=` is given. |
-| `turnover` | Daily `sum(|Δpos|) / mean(|pos|)`, frequency-independent. |
+| `turnover` | Pooled ratio over the sample: `sum over days of sum(|Δpos|)` divided by `sum over days of mean(|pos|)`, frequency-independent and not dominated by days the book sits near zero. |
 | `holding(days)` | Average holding period implied by the turnover. |
 | `lptp` | Long-position-to-total-position: `0.5 + sum(pos) / (2 sum(|pos|))`. 1 long-only, 0 short-only, 0.5 dollar-neutral. |
 | `up_days` | Fraction of days with positive PnL. |
