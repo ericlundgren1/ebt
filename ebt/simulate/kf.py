@@ -355,10 +355,11 @@ def _extract_stacked_arrays(df, contract_col, time_col, value_col):
     if _HAS_POLARS and isinstance(df, (pl.DataFrame, pl.LazyFrame)):
         if isinstance(df, pl.LazyFrame):
             df = df.collect()
-        # Encode contracts as integers via Polars categorical
-        cat = df[contract_col].cast(pl.Categorical)
-        names = cat.cat.get_categories().to_list()
-        ids = cat.to_physical().to_numpy().astype('int32')
+        # Encode contracts as integers (same factorize as the pandas path; independent of the
+        # polars Categorical implementation, which changed in polars 2.0)
+        codes, uniques = pd.factorize(df[contract_col].cast(pl.String).to_numpy(), sort=True)
+        names = uniques.tolist()
+        ids = codes.astype('int32')
         ts = df[time_col].cast(pl.Datetime('ns')).to_physical().to_numpy().astype('int64')
         vals = df[value_col].to_numpy().astype('float64')
     elif time_col == '__index__':
