@@ -36,7 +36,11 @@ if [ -n "${RELEASE_DRY_RUN:-}" ]; then
 fi
 
 git add pyproject.toml ebt_rust/Cargo.toml ebt_rust/Cargo.lock
-git commit -m "Release v$VERSION"
+if git diff --cached --quiet; then
+    echo "version already $VERSION in the files; tagging the current commit"
+else
+    git commit -m "Release v$VERSION"
+fi
 git tag -a "v$VERSION" -m "v$VERSION"
 git push
 git push origin "v$VERSION"
