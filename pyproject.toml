@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ebt-backtest"
-version = "0.1.0"
+version = "0.1.1"
 description = "Backtesting and evaluation toolkit for position-based trading strategies"
 readme = "README.md"
 requires-python = ">=3.9"

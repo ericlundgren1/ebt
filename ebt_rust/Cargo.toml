@@ -1,6 +1,6 @@
 [package]
 name = "ebt_rust"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "MIT"
 description = "Rust kernels for ebt: backtest, execution, position combination and outlier detection"
