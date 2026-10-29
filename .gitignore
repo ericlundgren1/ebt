@@ -3,3 +3,4 @@ __pycache__/
 *.egg-info/
 build/
 ebt_rust/target/
+dist/

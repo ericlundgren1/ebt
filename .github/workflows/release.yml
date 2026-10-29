@@ -1,0 +1,74 @@
+name: Release
+
+# Triggered by scripts/release.sh (pushes a vX.Y.Z tag) -> builds sdist + wheels -> publishes to PyPI.
+# "Run workflow" from the Actions tab does a dry run against TestPyPI by default.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      testpypi:
+        description: "Upload to TestPyPI instead of PyPI"
+        type: boolean
+        default: true
+
+jobs:
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pipx run build --sdist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  wheels:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-13, macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build wheels
+        run: pipx run cibuildwheel==2.21.3 --output-dir wheelhouse
+        env:
+          # the extension targets the stable ABI, so one cp39-abi3 wheel per platform covers Python 3.9+
+          CIBW_BUILD: "cp39-*"
+          CIBW_SKIP: "*-musllinux_* *-win32 *_i686"
+          CIBW_ARCHS_LINUX: x86_64
+          CIBW_BEFORE_ALL_LINUX: curl -sSf https://sh.rustup.rs | sh -s -- -y
+          CIBW_ENVIRONMENT_LINUX: 'PATH=$HOME/.cargo/bin:$PATH'
+          CIBW_TEST_REQUIRES: numpy
+          CIBW_TEST_COMMAND: python -c "import ebt_rust"
+          MACOSX_DEPLOYMENT_TARGET: "10.12"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: wheelhouse/*.whl
+
+  publish:
+    needs: [sdist, wheels]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write   # trusted publishing, no API token needed
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - run: ls -l dist
+      - name: Publish to TestPyPI
+        if: github.event_name == 'workflow_dispatch' && inputs.testpypi
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+      - name: Publish to PyPI
+        if: github.event_name == 'push' || !inputs.testpypi
+        uses: pypa/gh-action-pypi-publish@release/v1

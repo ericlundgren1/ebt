@@ -38,6 +38,12 @@ are Rust kernels built into the package as `ebt_rust`.
 Requires Python 3.9+ and a Rust toolchain (https://rustup.rs) to build the extension.
 
 ```bash
+pip install ebt-backtest
+```
+
+Wheels are published for Linux x86_64, macOS and Windows (Python 3.9+). From a checkout:
+
+```bash
 pip install .
 # editable install (the top-level ebt_rust extension needs compat mode):
 pip install -e . --config-settings editable_mode=compat
@@ -152,6 +158,10 @@ pip install -e . --config-settings editable_mode=compat
 python -m pytest tests
 cd ebt_rust && cargo test --profile perf
 ```
+
+## Releasing
+
+`scripts/release.sh X.Y.Z` tags a release and the GitHub workflow publishes it; see `RELEASING.md`.
 
 ## License
 

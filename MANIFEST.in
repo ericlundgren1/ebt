@@ -1,0 +1,4 @@
+include LICENSE README.md
+include ebt_rust/Cargo.toml ebt_rust/Cargo.lock
+recursive-include ebt_rust/src *.rs
+recursive-include tests *.py
