@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+    branches: ["**"]   # every branch, not tags (the Release workflow covers those)
   pull_request:
 
 jobs:
