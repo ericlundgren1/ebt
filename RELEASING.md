@@ -8,8 +8,8 @@ scripts/release.sh 0.1.1
 
 It bumps the version in `pyproject.toml` and `ebt_rust/Cargo.toml`, commits, tags `v0.1.1` and
 pushes. The tag starts the **Release** workflow (`.github/workflows/release.yml`), which builds
-the sdist and the wheels (Linux x86_64, macOS x86_64 and arm64, Windows x86_64; one abi3 wheel
-per platform for Python 3.9+) and publishes them to PyPI as `ebt-backtest`.
+the sdist and the wheels (Linux x86_64 and Windows x86_64; one abi3 wheel per platform for
+Python 3.9+; macOS installs from the sdist) and publishes them to PyPI as `ebt-backtest`.
 
 ## One-time setup
 

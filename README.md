@@ -41,7 +41,7 @@ Requires Python 3.9+ and a Rust toolchain (https://rustup.rs) to build the exten
 pip install ebt-backtest
 ```
 
-Wheels are published for Linux x86_64, macOS and Windows (Python 3.9+). From a checkout:
+Wheels are published for Linux x86_64 and Windows (Python 3.9+); other platforms, including macOS, build from the sdist with a Rust toolchain. From a checkout:
 
 ```bash
 pip install .
