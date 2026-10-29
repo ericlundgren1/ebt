@@ -1,0 +1,27 @@
+[package]
+name = "ebt_rust"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Rust kernels for ebt: backtest, execution, position combination and outlier detection"
+
+[lib]
+name = "ebt_rust"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = { version = "0.21", features = ["extension-module", "abi3-py38"] }
+numpy = { version = "0.21", default-features = false }
+ndarray = "0.16"
+rayon = "1.10"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+
+# Release optimisations without LTO, for `cargo test --profile perf`
+# (LTO causes PyO3 linker errors in test binaries)
+[profile.perf]
+inherits = "release"
+lto = false

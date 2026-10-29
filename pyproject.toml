@@ -1,0 +1,42 @@
+# Editable install must use compat mode so the top-level ebt_rust extension is importable:
+#   pip install -e . --config-settings editable_mode=compat
+
+[build-system]
+requires = ["setuptools>=64", "setuptools-rust>=1.5", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ebt"
+version = "0.1.0"
+description = "Backtesting and evaluation toolkit for position-based trading strategies"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+dependencies = [
+    "numpy", "pandas", "scipy", "scikit-learn", "numba", "matplotlib", "seaborn",
+    "Pillow", "tqdm", "psutil", "pyarrow", "dask[distributed]", "polars",
+    # ebt.simulate imports ebt.simulate.nn at package import time, so these are not optional
+    "torch", "torcheval", "torch-lr-finder", "tensorboard",
+]
+
+[project.optional-dependencies]
+nn = []  # kept for `pip install ebt[nn]` compatibility; the packages are core dependencies now
+notebook = ["ipython", "ipywidgets"]
+optimize = ["cvxpy"]
+test = ["pytest"]
+
+[tool.setuptools.packages.find]
+include = ["ebt*"]
+exclude = ["ebt_rust*"]
+
+[[tool.setuptools-rust.ext-modules]]
+target = "ebt_rust"
+path = "ebt_rust/Cargo.toml"
+binding = "PyO3"
+py-limited-api = true
