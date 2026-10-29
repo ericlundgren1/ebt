@@ -9,6 +9,7 @@ build-backend = "setuptools.build_meta"
 name = "ebt"
 version = "0.1.0"
 description = "Backtesting and evaluation toolkit for position-based trading strategies"
+readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
 classifiers = [
