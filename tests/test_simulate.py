@@ -623,6 +623,54 @@ def test_combine_positions_no_overlap():
     assert result.loc[idx2[0], 'A'] == 3.0
 
 
+def test_combine_positions_max_ffill_end_of_df():
+    """A df that stops printing is carried for max_ffill, then flattened to 0."""
+    idx_short = pd.date_range('2020-01-01', periods=5, freq='D')     # last print Jan 5
+    idx_long = pd.date_range('2020-01-01', periods=46, freq='D')     # to Feb 15
+    df1 = pd.DataFrame({'A': [1.0] * 5}, index=idx_short)
+    df2 = pd.DataFrame({'A': [2.0] * 46}, index=idx_long)
+
+    result = combine_positions([df1, df2])                            # default 14D
+    assert result.loc['2020-01-19', 'A'] == 3.0                       # Jan 5 + 14d: still filled
+    assert result.loc['2020-01-20', 'A'] == 2.0                       # first row past the cap
+    assert (result.loc['2020-01-20':, 'A'] == 2.0).all()
+
+    legacy = combine_positions([df1, df2], max_ffill=None)
+    assert (legacy['A'] == 3.0).all()
+
+    # mean: df1 leaves the active count once flattened; when every df is closed the
+    # cell is 0, not NaN
+    df3 = pd.DataFrame({'A': [4.0] * 10}, index=idx_long[:10])        # last print Jan 10
+    blank = pd.DataFrame({'A': np.nan}, index=idx_long)               # extends the union only
+    mean = combine_positions([df1, df3, blank], agg='mean')
+    assert np.isclose(mean.loc['2020-01-03', 'A'], 2.5)               # (1 + 4) / 2
+    assert np.isclose(mean.loc['2020-01-20', 'A'], 4.0)               # df1 closed
+    assert mean.loc['2020-01-25', 'A'] == 0.0                         # df3 closed too
+    assert mean.index[-1] == idx_long[-1]
+
+
+def test_combine_positions_max_ffill_gap_and_reprint():
+    """An interior NaN gap longer than max_ffill flattens, and the next print trades from 0."""
+    idx = pd.date_range('2020-01-01', periods=40, freq='D')
+    a = np.full(40, np.nan); a[0] = 1.0; a[31] = 5.0                  # prints Jan 1 and Feb 1
+    df1 = pd.DataFrame({'A': a}, index=idx)
+    df2 = pd.DataFrame({'A': np.zeros(40)}, index=idx)
+
+    result = combine_positions([df1, df2], max_ffill='14D')
+    assert (result.loc[:'2020-01-15', 'A'] == 1.0).all()
+    assert (result.loc['2020-01-16':'2020-01-31', 'A'] == 0.0).all()
+    assert (result.loc['2020-02-01':, 'A'] == 5.0).all()
+
+    # the single-df path (pandas) and the kernel agree
+    single = combine_positions([df1], max_ffill='14D')
+    pd.testing.assert_frame_equal(single, combine_positions([df1, df1.iloc[:0]], max_ffill='14D'))
+    assert single.loc['2020-01-20', 'A'] == 0.0
+
+    # a cap of 0 keeps only the print rows themselves
+    zero = combine_positions([df1, df2], max_ffill='0D')
+    assert zero.loc['2020-01-01', 'A'] == 1.0 and zero.loc['2020-01-02', 'A'] == 0.0
+
+
 def test_combine_positions_mean_staggered_start():
     """Mean correctly divides by count of active dfs, not total dfs."""
     idx = pd.date_range('2020-01-01', periods=10, freq='D')
@@ -872,3 +920,26 @@ def test_make_ohlc_boundary_print_belongs_to_its_bar_and_paths_agree():
     summed = make_forward_labels(r, smoothing_length=3, mean=False)
     pd.testing.assert_series_equal(summed['A'], make_forward_labels(r['A'], smoothing_length=3, mean=False), check_names=False)
     assert not np.allclose(summed['A'].dropna(), make_forward_labels(r['A'], smoothing_length=3, mean=True).dropna())
+
+
+def test_risk_unit_inputs_are_not_vol_scaled():
+    """Returns already divided by their vol carry a unit daily vol on every name, so one_pager
+    takes the positions as risk units: a constant book has zero turnover, not the drift of a
+    vol estimate of 1 +- noise. Native prices keep the per-name scaling."""
+    from ebt.simulate.plot import one_pager, _estimate_asset_vol
+    rng = np.random.default_rng(3)
+    n, k = 1500, 3
+    idx = pd.date_range('2015-01-01', periods=n, freq='B')
+    v = np.exp(np.cumsum(0.05 * rng.standard_normal((n, k)), axis=0))
+    r = pd.DataFrame(v * rng.standard_normal((n, k)), index=idx, columns=list('ABC'))
+    r_risk = (r / r.ewm(span=60, min_periods=20).std().shift(1)).dropna()
+    pos = pd.DataFrame(1.0, index=r_risk.index, columns=r_risk.columns)
+    kf = one_pager(pos, r_risk, shift=1, plot=False, kfs=['turnover', 'holding(days)'])['kf']
+    assert kf['turnover'] == 0.0
+    assert np.isinf(kf['holding(days)'])
+    assert (_estimate_asset_vol(r_risk.cumsum()).dropna() == 1.0).all().all()
+    px = 100 + (5 * r).cumsum()
+    vol = _estimate_asset_vol(px)
+    assert (vol.median() > 1.25).any()
+    kf_px = one_pager(pos.reindex(px.index).fillna(1.0), px, shift=1, plot=False, kfs=['turnover'])['kf']
+    assert kf_px['turnover'] > 0.0

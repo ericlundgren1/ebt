@@ -511,10 +511,12 @@ fn correlation_to_trend_core(
 ///   df_col_indices_list: list of 1D u32 arrays mapping source columns → target column indices
 ///   n_target_cols: total number of columns in result
 ///   is_mean: whether to compute mean instead of sum
+///   max_ffill_ns: forward-fill a cell for at most this long (ns) after its last non-NaN
+///       print, then flatten it to 0 until the next print; None = indefinitely
 ///
 /// Returns: 1D f64 array (row-major flattened result, n_target * n_target_cols)
 #[pyfunction]
-#[pyo3(signature = (target_timestamps, df_timestamps_list, df_values_list, df_n_rows_list, df_n_cols_list, df_col_indices_list, n_target_cols, is_mean))]
+#[pyo3(signature = (target_timestamps, df_timestamps_list, df_values_list, df_n_rows_list, df_n_cols_list, df_col_indices_list, n_target_cols, is_mean, max_ffill_ns=None))]
 fn combine_positions_core(
     py: Python<'_>,
     target_timestamps: numpy::PyReadonlyArray1<i64>,
@@ -525,7 +527,13 @@ fn combine_positions_core(
     df_col_indices_list: Vec<numpy::PyReadonlyArray1<u32>>,
     n_target_cols: usize,
     is_mean: bool,
+    max_ffill_ns: Option<i64>,
 ) -> PyResult<PyObject> {
+    if let Some(cap) = max_ffill_ns {
+        if cap < 0 {
+            return Err(verr(format!("max_ffill_ns must be >= 0, got {}", cap)));
+        }
+    }
     let target_ts = target_timestamps.as_slice()
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("{}", e)))?;
     check_sorted("target_timestamps", target_ts)?;
@@ -574,7 +582,7 @@ fn combine_positions_core(
 
     let (result, first_valid, count_starts) = py.allow_threads(|| {
         combine_positions::combine_positions_core(
-            target_ts, &dfs, n_target_cols, is_mean,
+            target_ts, &dfs, n_target_cols, is_mean, max_ffill_ns,
         )
     });
 

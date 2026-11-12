@@ -523,6 +523,9 @@ def _align_spreads(spreads, target, tolerance='10min', fallback_multiplier=10.0)
     return aligned
 
 
+_UNIT_VOL_BAND = (0.8, 1.25)  # every name's median measured daily vol in here -> inputs are risk units
+
+
 def _estimate_asset_vol(prices, span=60, min_periods=20):
     """Estimate per-asset volatility from daily price diffs with EMA.
 
@@ -535,6 +538,10 @@ def _estimate_asset_vol(prices, span=60, min_periods=20):
     that depends on the vol is NaN where the vol is (one_pager drops those name-bars from its
     risk-unit figures; the stop-break cannot suppress a trade it cannot size). The value is
     constant within each calendar day, which ebt.simulate.grid relies on.
+
+    Inputs already in risk units are detected (every name's median vol inside
+    ``_UNIT_VOL_BAND``) and get a vol of exactly 1.0 where measured, so risk-unit positions
+    are not scaled by estimation noise. Pass ``volatility=`` to one_pager to override.
     """
     # label/closed='right': the daily bar stamped T holds prices known at T, so the
     # ffill-reindex below never hands an intraday bar a vol computed from that day's
@@ -544,6 +551,22 @@ def _estimate_asset_vol(prices, span=60, min_periods=20):
     vol_daily = returns.ewm(span=span, min_periods=min_periods).std()
     # a zero std is not a measurement either
     vol_daily = vol_daily.replace(0.0, np.nan)
+    # Prices already in risk units (returns / vol, the risk_adjust convention) carry a unit
+    # daily vol on every name, and positions on them are already risk units. Multiplying
+    # those by a measured vol of 1 +- noise is a no-op in level, but the noise's drift reads
+    # as turnover (a constant book shows ~1.6%/day at span 60). So when every name's median
+    # measured vol sits inside _UNIT_VOL_BAND, use exactly 1.0 wherever a vol is measured. A
+    # native contract whose $-vol happens to sit in the band is treated the same way: scaling
+    # by ~1 or by 1 differs by at most the band width.
+    med = vol_daily.median(axis=0).dropna()
+    if len(med) and med.between(*_UNIT_VOL_BAND).all():
+        _LOGGER.warning('asset vol ~1 on every name (medians %.2f..%.2f): inputs taken as risk units, '
+                        'positions NOT vol-scaled for turnover/holding/lptp/bias figures; pass '
+                        'volatility= to override', med.min(), med.max())
+        vol_daily = vol_daily.where(vol_daily.isna(), 1.0)
+    elif len(med):
+        _LOGGER.info('positions vol-scaled per name for the risk-unit figures (asset vol medians '
+                     '%.3g..%.3g); pass volatility= to override', med.min(), med.max())
     # Forward-fill to original prices index (causal: each bar sees last known daily vol)
     return vol_daily.reindex(prices.index, method='ffill')
 

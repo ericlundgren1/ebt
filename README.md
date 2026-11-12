@@ -116,6 +116,9 @@ objective.
 ## Key figures
 
 Computed by `one_pager` and `plot_ensemble` ("kf" = key figure). Sharpe and risk use daily PnL.
+Turnover, holding, lptp and the bias split are measured in per-name risk units (position × daily
+price vol, a causal EWM estimate). Inputs that are already risk units (returns divided by their
+vol, so every name has unit vol) are detected and left unscaled, with a warning; `volatility=` overrides.
 
 | Key figure | Meaning |
 |---|---|

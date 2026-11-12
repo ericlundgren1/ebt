@@ -142,12 +142,31 @@ def dask_client_muted(**client_kwargs):
 from ebt.simulate.postprocessing import risk_adjust  # noqa: F401
 
 
-def combine_positions(dfs, agg='sum'):
+def _ffill_capped(df, max_ffill):
+    """``df.ffill()`` where a cell is carried for at most ``max_ffill`` after its last
+    non-NaN print and is 0 past that (strictly later than print + max_ffill) until the
+    next print. Rows before a column's first print stay NaN. ``None`` = plain ffill."""
+    ff = df.ffill()
+    if max_ffill is None or df.empty:
+        return ff
+    from ebt.simulate.kf import _index_to_ns
+    cap = pd.Timedelta(max_ffill).value
+    ts = np.asarray(_index_to_ns(df.index), dtype=np.int64)
+    last = np.maximum.accumulate(np.where(df.notna().values, np.arange(len(df))[:, None], -1), axis=0)
+    stale = (last >= 0) & ((ts[:, None] - ts[np.maximum(last, 0)]) > cap)
+    return ff.mask(stale, 0.0)
+
+
+def combine_positions(dfs, agg='sum', max_ffill='14D'):
     """
     Combine position DataFrames that update at different frequencies.
 
     Each input is forward-filled to a common timeline (union of all input
-    timestamps) before aggregation, so slow-updating positions carry forward.
+    timestamps) before aggregation, so slow-updating positions carry forward —
+    for at most ``max_ffill`` after a cell's last non-NaN print. Past that the
+    cell is flattened to 0 (a trade the backtest pays for) until it prints again,
+    so a signal that stops printing, or a name that goes NaN, does not hold its
+    last position forever.
 
     Algorithm: compute trades (position deltas) from each df, scatter them
     onto the target index, then cumsum to recover combined positions. This
@@ -158,7 +177,10 @@ def combine_positions(dfs, agg='sum'):
 
     Args:
         dfs: list of DataFrames (DatetimeIndex, asset columns). Different frequencies and columns OK.
-        agg: 'sum' (default) or 'mean'.
+        agg: 'sum' (default) or 'mean'. Mean divides by the dfs that are active in the
+            cell: started, and not flattened by ``max_ffill``.
+        max_ffill: longest forward fill after a print, anything ``pd.Timedelta`` accepts
+            (default 14 days). None = forward-fill indefinitely (the pre-2026-11 behaviour).
 
     Returns:
         Single DataFrame with combined positions.
@@ -167,7 +189,11 @@ def combine_positions(dfs, agg='sum'):
         return pd.DataFrame()
 
     if len(dfs) == 1:
-        return dfs[0].ffill()
+        return _ffill_capped(dfs[0], max_ffill)
+
+    max_ffill_ns = None if max_ffill is None else int(pd.Timedelta(max_ffill).value)
+    if max_ffill_ns is not None and max_ffill_ns < 0:
+        raise ValueError(f'combine_positions: max_ffill must be >= 0, got {max_ffill!r}')
 
     # Build target index: union of all input timestamps
     target_idx = dfs[0].index
@@ -221,6 +247,7 @@ def combine_positions(dfs, agg='sum'):
         df_col_indices_list,
         n_cols,
         is_mean,
+        max_ffill_ns,
     )
 
     result = result_flat.reshape(len(target_idx), n_cols)
